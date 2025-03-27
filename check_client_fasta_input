@@ -1,0 +1,316 @@
+#!/usr/local/bin/Rscript
+# vim: set ft=r:
+
+# USAGE:
+# this script can be called from command line with arguments (main() is called)
+#   or it can be sourced from within another script (main is not called)
+#   (in which case the function check_client_fasta_input should be 
+#    called directly with arguments)
+
+# OUTPUT: 
+# Internally the script builds a table with columns ID and seq.
+# Each test adds a column to this table specifying the result of the test.
+# Depending on user supplied arguments the script writes an overview of the tests
+# to stdout or to a log file.
+# The return value of the script is 0 if no errors were detected, 1 otherwise.
+
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(argparse))
+
+suppressPackageStartupMessages(require(seqinr))
+suppressPackageStartupMessages(require(tools))
+
+########################
+# FUNCTION DEFINITIONS #
+########################
+# import fasta files
+import_fasta <- function(inputfile, refalt) {
+	# import sequences from (multiple) fasta files
+	# returns data.table with columns ID and seq
+	
+	fasta.dt <- rbindlist(lapply(inputfile, 
+		function(fname)  {
+			fasta <- unlist(seqinr::read.fasta(fname, as.string=TRUE, 
+			   				strip.desc=TRUE, 
+							whole.header=TRUE))
+
+			# create data.table, filling all data
+			data.table(ID=names(fasta), seq=fasta)
+			     
+		}))
+
+  # discard FREETEXT, store SHORTID_REF/ALT, SHORTID and REF/ALT in new columns
+  if (refalt) {
+  fasta.dt[, shortid := sub("^(.+_)?([A-Za-z0-9_]{1,20})_(REF|ALT_[0-9]+)$",
+                          '\\2', ID)]
+  fasta.dt[, refalt:=sub("^(.+_)?([A-Za-z0-9_]{1,20})_(REF|ALT_[0-9]+)$",
+                          '\\3', ID)]
+  fasta.dt[, IDstrict := paste0(shortid, "_", refalt)]
+  } else {
+    stop("Not implemented yet")
+  }
+
+
+	return(fasta.dt)
+}
+
+####################
+# OUTPUT FUNCTIONS #
+####################
+write_summary <- function(output, seq.dt) {
+  # write summary of tests to output
+  # number of sequences
+  cat("# supplied sequences: ", seq.dt[, .N], "\n", file = output, append = TRUE)
+  # number of correct sequences
+#  cat("# correct sequences: ", seq.dt[ID_format == 0, .N], "\n",
+#      file = output, append = TRUE)
+#  # number of REF sequences
+#  cat("# correct REF sequences: ", seq.dt[ID_format == 0 & refalt == "REF", .N],
+#      "\n", file = output, append = TRUE)
+#  # number of ALT sequences
+#  cat("# correct ALT sequences: ", seq.dt[ID_format == 0 & refalt != "REF", .N],
+#      "\n", file = output, append = TRUE)
+  # number of non-unique sequences
+  cat("# non-unique sequences: ", seq.dt[seq_unique > 0, .N], "\n",
+      file = output, append = TRUE)
+  # number of sequences with length outside bounds
+  cat("# sequences with length outside bounds: ", seq.dt[seq_length == 1, .N],
+      "\n", file = output, append = TRUE)
+  # number of sequences with non-standard bases
+  cat("# sequences with non-standard bases: ", seq.dt[seq_standard == 1, .N],
+      "\n", file = output, append = TRUE)
+  # number of sequences with ID format errors
+  cat("# sequences with ID format errors: ", seq.dt[ID_format == 1, .N], "\n",
+      file = output, append = TRUE)
+}
+
+write_table <- function(output,seq.dt) {
+  # write entire table, with column seq as last column
+  fwrite(seq.dt[, .SD, .SDcols = setdiff(names(seq.dt), "seq")],
+         file = output, append = TRUE, sep = "\t", col.names = TRUE)
+}
+
+##################
+# TEST FUNCTIONS #
+##################
+# test ID's are unique
+test_IDs_unique <- function(seq.dt) {
+  # adds a column 'ID_unique' to seq.dt specifying if ID is unique
+  # ID_unique is 0 if ID is unique, 
+  #   otherwise the number of the group of ID's this ID belongs to
+  seq.dt[, ID_unique := (.N)-1, by = "ID"]
+  #seq.dt[, ID_unique := .GRP, by = "ID"]
+}
+
+# test sequences are unique
+test_seq_unique <- function(seq.dt) {
+  # adds a column 'seq_unique' to seq.dt specifying if sequence is unique
+  # seq_unique is 0 if sequence is unique,
+  #   otherwise the number of the group of sequences this sequence belongs to
+  seq.dt[, seq_unique := (.N)-1, by = 'seq'
+       ][seq_unique > 0, seq_unique := .GRP, by = 'seq']
+}
+
+# test length of sequences
+test_seq_length <- function(seq.dt, max_length) {
+  # adds a column 'seq_length' to seq.dt specifying if sequence length is 
+  #   within bounds
+  # seq_length is 0 if sequence length is within bounds, 1 otherwise
+  min_length <- max_length - 100
+  seq.dt[, seq_length := 0
+       ][nchar(seq) <= min_length | nchar(seq) > max_length, seq_length:=1]
+}
+
+# test sequences contain standard bases
+test_bases_standard <- function(seq.dt) {
+  # adds a column 'seq_standard' to seq.dt specifying
+  #   if sequence contains only standard bases
+  # seq_standard is 0 if sequence contains only standard bases, 1 otherwise
+  seq.dt[, seq_standard := 0
+       ][grepl("[^ACTGactg]", seq), seq_standard := 1]
+}
+
+test_ID_unique <- function(seq.dt) {
+  # IDstrict is unique
+  seq.dt[, N := .N, by = IDstrict][N != 1, ID_format := 1][, N := NULL]
+}
+
+test_ID_REFALT_correct_format <- function(seq.dt) {
+  # correct format: {FREETEXT}_{SHORTID}_{REF|ALT_n}
+  # FREETEXT can be anything and can be absent: (.+_)?
+  # SHORTID is max 20 characters long, consisting of A-Z, a-z, 0-9: [A-Za-z0-9]{1,20}
+  # REF|ALT_n is either "REF" or "ALT_n" where n is an integer: (REF|ALT_[0-9]+)
+  seq.dt[!grepl("^(.+_)?([A-Za-z0-9]{1,20})_(REF|ALT_[0-9]+)$", ID),
+         ID_format := 1]
+}
+
+test_ID_REFALT_association <- function(seq.dt, refalt) {
+  # test association REF and ALT ID's
+  # SHORTID is shared among a single REF and associated ALT's, unique per REF
+  # count number of REF's per SHORTID, if not exactly 1, ID is invalid
+  # count number of ALT's per SHORTID, if not >=1, ID is invalid
+  seq.dt[, flag := .SD[sum(refalt == "REF") != 1 |
+                       sum(refalt != "REF") == 0, .N] > 0,
+         by = "shortid"][flag == TRUE, ID_format := 1][, flag := NULL]
+}
+
+test_ID_REFALT_ALTn_is_integer <- function(seq.dt, refalt) {
+  # n in ALT_n is an integer (not necessary 1,2,3,..)
+  # extract 'n' from refalt and coerce it to integer
+  # if n is not an integer (is.na()), ID is invalid
+  seq.dt[grep("^ALT_(\\d+)$", refalt),
+         n:=as.numeric(sub("^ALT_(\\d+)$", '\\1', refalt))
+       ][is.na(n) & refalt != "REF", ID_format := 1][, n := NULL]
+}
+
+test_ID_format_refalt <- function(seq.dt, refalt) {
+  # adds a column 'ID_format' to seq.dt specifying if ID is in correct REF/ALT format
+  # ID_format is 0 if ID is in correct format, 1 otherwise
+
+  # perform tests
+  test_ID_unique(seq.dt)
+  test_ID_REFALT_correct_format(seq.dt)
+  test_ID_REFALT_association(seq.dt, refalt)
+  test_ID_REFALT_ALTn_is_integer(seq.dt, refalt)
+
+  # remove temporary columns
+  #seq.dt[, c("shortid", "refalt", "IDstrict") := NULL]
+}
+
+test_ID_format_synthetic <- function(seq.dt) {
+  stop("Not implemented yet")
+}
+
+# test ID format
+test_ID_format <- function(seq.dt, refalt) {
+  # adds a column 'ID_format' to seq.dt specifying if ID is in correct format
+  # ID_format is 0 if ID is in correct format, 1 otherwise
+  # ID_format is 0 if ID is in correct format, 1 otherwise
+  seq.dt[, ID_format := 0]
+  if (refalt) {
+    test_ID_format_refalt(seq.dt)
+  } else {
+    test_ID_format_synthetic(seq.dt)
+  }
+}
+
+
+################
+##### MAIN #####
+################
+
+get_parser <- function() {
+  # create parser object
+  parser <- ArgumentParser(description = 
+"Check sequences from one or more fasta files for compliance with expected format.
+
+Requirements of fasta input files:
+- no duplicated sequences
+- sequence length between supplied max length, and max length-100
+- sequences contain only standard bases (A, T, C, G)
+- sequence ID's:
+  - must be unique
+  - format (REF/ALT): {FREETEXT}_{SHORTID}_{REF|ALT_n}
+  - format (SYNTHETIC): {FREETEXT}_{SHORTID}
+  - {SHORTID} must be unique in synthetic case, 
+    or identical among a set of a single REF and all associated ALT's
+  - n in ALT_n is 1 for first ALT, 2 for second, etc.
+
+Each fasta file can contain one or more fasta sequences. 
+The set of supplied fasta files make up a single library.
+")
+
+  # specify our desired options
+  # by default ArgumentParser will add an help option
+  parser$add_argument("-i", "--inputfile", required = TRUE, nargs = "+",
+                      help = "Input fasta filename(s) (ext: .fa or .fasta)")
+  parser$add_argument("-l", "--logfile", required = FALSE, default = NULL,
+                      help = "Log filename (ext: .log), summary of tests will be printed to log")
+  parser$add_argument("-o", "--output", required = FALSE, default = NULL,
+                      help = "Output filename (ext: .tsv)")
+  parser$add_argument("-q", "--quiet", action = "store_true",
+                      help = "optional: do not write to stdout, by default a summary of tests will be printed to stdout")
+  parser$add_argument("-r", "--refalt", action = "store_true",
+                      help = "optional: use REF/ALT ID format, default = synthetic ID format")
+  parser$add_argument("-m", "--max_length", required = TRUE, type = "integer",
+                      help = "maximum sequence length; range of allowed lengths is (maxlength-100, maxlength]")
+
+  return(parser)
+}
+
+main <- function() {
+  # get command line options
+  parser <- get_parser()
+  args <- parser$parse_args()
+  inputfile <- args$inputfile
+  logfile <- args$logfile
+  quiet <- args$quiet
+  max_length <- args$max_length
+  refalt <- args$refalt
+  output <- args$output
+
+  check_client_fasta_input(inputfile,
+                           logfile,
+                           quiet,
+                           max_length,
+                           refalt,
+                           output)
+}
+
+check_client_fasta_input <- function(inputfile,
+                                     logfile = NULL,
+                                     quiet = FALSE,
+                                     max_length,
+                                     refalt = FALSE,
+                                     output = NULL) {
+  # checks:
+  # inputfiles exist?
+  for( fname in inputfile) {
+    if( ! file.exists(fname) )
+      stop(sprintf("Error: supplied inputfile '%s' does not exist", fname))
+  }
+  # input file is has extension .fa or .fasta
+  for( fname in inputfile) {
+    if( ! tools::file_ext(fname) %in% c('fa','fasta'))
+      stop("Error: inputfile should be a fasta file with extension '.fa' or '.fasta'")
+  }
+  # dir for logfile exists, or create
+	if( ! is.null(logfile) && ! dir.exists(dirname(logfile)))
+		dir.create(dirname(logfile), recursive=TRUE, mode="0775")
+
+	# import fasta file
+	seq.dt <- import_fasta(inputfile, refalt)
+
+	# tests
+	test_IDs_unique(seq.dt)
+	test_seq_unique(seq.dt)
+	test_seq_length(seq.dt, max_length)
+	test_bases_standard(seq.dt)
+	test_ID_format(seq.dt, refalt)
+
+	# write results
+	# if log ....
+	if( ! is.null(logfile) ) {
+		write_summary(logfile,seq.dt)
+	}
+	# if not quiet ....
+	if( ! quiet ) write_summary(stdout(),seq.dt)
+	#write_table("")
+	# if output ....
+	if( ! is.null(output) ) {
+		write_table(output,seq.dt)
+	}
+
+	# return value
+	if( seq.dt[,any(.SD>0),.SDcols=setdiff(names(seq.dt), c('ID','seq'))] )
+          return(1)
+	else
+          return(0)
+}
+
+if (identical(environment(), globalenv())) {
+  if (!interactive()) {
+    status <- main()
+    quit(status=status, save="no")
+  }
+}
