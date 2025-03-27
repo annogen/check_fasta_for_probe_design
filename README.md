@@ -26,14 +26,18 @@ All are available on [CRAN](https://cran.r-project.org/)
 
 The script can be run on linux terminal, eg:
 
-path/to/script/check_client_fasta_input -i file1.fa file2.fa -r -m 270 -l log.txt -q -o test_results.tsv
+`path/to/script/check_client_fasta_input -i file1.fa file2.fa -r -m 270 -l log.txt -q -o test_results.tsv`
 
+where:
+
+```
 -i: input files in fasta format, file extension .fa or .fasta. More than 1 file is allowed
 -r: assume REF/ALT format (default: assume std synthetic format)
 -l: write summary of test results to logfile 'log.txt'
 -m: maximum length of sequences. Sequences are allowed to have lower lengths up to max - 99
 -q: do _not_ print summary of results to stdout
 -o: print test results per sequence to file 'test_results.tsv'
+```
 
 ### Interactive session
 
