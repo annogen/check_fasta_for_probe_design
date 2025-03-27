@@ -1,6 +1,47 @@
 # Test whether supplied sequences in fasta file(s) comply with Annogen probe design requirements
 
-This is an R-script which tests whether sequences and sequence labels are compliant. It can be run from the commandline or be sourced into an interactive R-session.
+This is an R-script which tests whether sequences and sequence labels are
+compliant. It can be run from the commandline or be sourced into an interactive
+R-session.
+
+## Output
+
+### Exit status
+
+The script returns 0 if all sequence/ID's are correct, and 1 otherwise. The
+return value is returned as exit status when the script is run from the
+commandline, or as return value from the function
+'check_client_fasta_input(..)' when run interactively.
+
+### Full table of test results per sequence
+
+Each sequence/ID, and each REF/ALT set, is tested on a number of criteria. For
+each test a value is returned where '0' always means the sequence/ID passed the
+test correctly. A non-zero value always means the sequence/ID failed the test.
+
+
+Tests:
+
+* sequence ID's are unique
+* sequences are unique
+* sequences do not contain duplicated reverse complement sequences
+* length of sequences are within limits
+* sequence consist of standard bases only
+* the sequence ID has correct format
+* (sequence ID's do not contain spaces)
+* sets of REF/ALT contain exactly 1 REF and >=1 ALT
+* each ALT is tagged with an integer (ALT_n), which is unique within the REF/ALT set
+
+Running the tests builds a table with rows for every sequence, and a column for
+every test. This table is written to file if option -o is given
+
+
+### Summary of tests
+
+A summary of the tests is by default written to stdout (unless option '-q'),
+and optionally to a log file (option -l). The summary specifies the total
+number of sequences tested, and for each test the number of sequences failing
+that test.
 
 ## Usage
 
