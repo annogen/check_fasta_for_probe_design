@@ -54,6 +54,14 @@ import_fasta <- function(inputfile, refalt) {
 	return(fasta.dt)
 }
 
+revcom <- function(dnaseq) {
+        if( any( !sapply(dnaseq,grepl, pattern='^[ACGT]*$', ignore.case=TRUE) ) ) {
+                print(dnaseq)
+                stop("Error: sequence in function 'revcom' contains non-canonical bases")
+        }
+        stringi::stri_reverse(chartr(x=dnaseq, old='ACGTacgt',new='TGCAtgca'))
+}
+
 ####################
 # OUTPUT FUNCTIONS #
 ####################
@@ -72,6 +80,10 @@ write_summary <- function(output, seq.dt) {
 #      "\n", file = output, append = TRUE)
   # number of non-unique sequences
   cat("# non-unique sequences: ", seq.dt[seq_unique > 0, .N], "\n",
+      file = output, append = TRUE)
+  # number of non-unique reverse complement sequences
+  cat("# duplicate reverse complement sequences: ", 
+      seq.dt[seq_revcompl_unique > 0, .N], "\n",
       file = output, append = TRUE)
   # number of sequences with length outside bounds
   cat("# sequences with length outside bounds: ", seq.dt[seq_length == 1, .N],
@@ -109,6 +121,18 @@ test_seq_unique <- function(seq.dt) {
   #   otherwise the number of the group of sequences this sequence belongs to
   seq.dt[, seq_unique := (.N)-1, by = 'seq'
        ][seq_unique > 0, seq_unique := .GRP, by = 'seq']
+}
+
+test_seq_revcom_unique <- function(seq.dt) {
+  seq <- seq.dt$seq
+  seqrc <- revcom(seq)
+  return(seq.dt[,seq_revcompl_unique:=seq %in% seqrc])
+
+  rbind(seq.dt[,.(seq)],
+        seq.dt[,.(seq=revcom(seq))][]
+        )[, seq_revcompl_unique := (.N)-1, by = 'seq'
+        ][seq_revcompl_unique > 0, seq_revcompl_unique := .GRP, by = 'seq'
+        ][1:seq.dt[,.N]]
 }
 
 # test length of sequences
@@ -283,6 +307,7 @@ check_client_fasta_input <- function(inputfile,
 
 	# tests
 	test_IDs_unique(seq.dt)
+        test_seq_revcom_unique(seq.dt)
 	test_seq_unique(seq.dt)
 	test_seq_length(seq.dt, max_length)
 	test_bases_standard(seq.dt)
