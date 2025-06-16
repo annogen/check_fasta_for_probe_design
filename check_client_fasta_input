@@ -127,12 +127,6 @@ test_seq_revcom_unique <- function(seq.dt) {
   seq <- seq.dt$seq
   seqrc <- revcom(seq)
   return(seq.dt[,seq_revcompl_unique:=seq %in% seqrc])
-
-  rbind(seq.dt[,.(seq)],
-        seq.dt[,.(seq=revcom(seq))][]
-        )[, seq_revcompl_unique := (.N)-1, by = 'seq'
-        ][seq_revcompl_unique > 0, seq_revcompl_unique := .GRP, by = 'seq'
-        ][1:seq.dt[,.N]]
 }
 
 # test length of sequences
