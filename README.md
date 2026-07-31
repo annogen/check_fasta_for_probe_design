@@ -1,3 +1,7 @@
+# Update 260731; no longer current; funtionality moved to TWIST pipeline
+
+the script is now (260731) included (again) in the TWIST probe design pipeline. This repo is no longer maintained.
+
 # Test whether supplied sequences in fasta file(s) comply with Annogen probe design requirements
 
 This is an R-script which tests whether sequences and sequence labels are
